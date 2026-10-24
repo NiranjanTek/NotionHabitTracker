@@ -1,0 +1,254 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Clock</title>
+<!--
+  CLOCK (embed for Notion)
+  ------------------------
+  One self-contained file. No external fonts, scripts or trackers.
+  Needs NO setup from the person using it: it shows their device's local time.
+  Optional settings go on the end of the link:
+
+    ?style=analog       "analog" (default) or "digital".
+    &seconds=on         "on" (default) or "off". Shows or hides the seconds.
+    &hours=24           Digital only. "24" (default) or "12".
+    &tz=Europe/Berlin   Show another time zone (an IANA name). Default: the device's own.
+    &lang=en            Language for the weekday and month. Default "en" (e.g. de, fr, es).
+    &theme=auto         "auto" (default: follows the device's light/dark setting),
+                        "dark", "light", or "neutral" (mid-greys that stay readable on
+                        both light and dark pages, whatever the device is set to).
+    &bg=transparent     Background. Default "transparent" so the clock sits on the page.
+                        Use 6 hex digits (e.g. 000000) for a solid colour.
+    &accent=B5B5B5      Colour of the second hand and centre dot, 6 hex digits, no #.
+-->
+<style>
+  /* Light page (the default when the device is in light mode). */
+  :root {
+    --bg: transparent;
+    --ink: #111111;      /* hands, hour ticks, time */
+    --muted: #5c5c5c;    /* date, seconds, AM/PM */
+    --track: #a8a8a8;    /* the 48 small minute ticks */
+    --accent: #3a3a3a;   /* second hand and centre dot */
+    --font: "Cormorant Garamond", "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  }
+  /* Dark page: follows the device unless a theme is forced in the link. */
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+      --ink: #ffffff;
+      --muted: #a6a6a6;
+      --track: #6b6b6b;
+      --accent: #c4c4c4;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ink: #ffffff;
+    --muted: #a6a6a6;
+    --track: #6b6b6b;
+    --accent: #c4c4c4;
+  }
+  /* Neutral: mid-greys that read on both white and near-black pages.
+     The minute ticks use transparency, so they stay fainter than the hour ticks on either. */
+  :root[data-theme="neutral"] {
+    --ink: #858585;
+    --muted: #7a7a7a;
+    --track: rgba(133, 133, 133, 0.55);
+    --accent: #666666;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); }
+  body {
+    font-family: var(--font);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap {
+    height: 100%;
+    min-height: 120px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  /* Analog */
+  #dial {
+    display: block;
+    width: min(100%, calc(100vh - 56px));
+    max-width: 320px;
+    aspect-ratio: 1;
+  }
+  .tick { stroke: var(--track); stroke-linecap: round; }
+  .tick.hour { stroke: var(--ink); }
+  .hand { stroke: var(--ink); stroke-linecap: round; }
+  .hand.sec { stroke: var(--accent); }
+  .cap { fill: var(--accent); }
+
+  /* Digital */
+  #digital {
+    display: none;
+    font-size: min(20vw, 30vh);
+    line-height: 1;
+    font-weight: 600;
+    font-variant-numeric: lining-nums tabular-nums;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+  #digital .sec { color: var(--muted); font-size: 0.5em; font-weight: 500; }
+  #digital .ampm { color: var(--muted); font-size: 0.4em; font-weight: 500; margin-left: 0.15em; }
+  body.digital #dial { display: none; }
+  body.digital #digital { display: block; }
+
+  .date {
+    margin: 0;
+    font-size: 19px;
+    line-height: 1.2;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <main class="wrap" id="wrap" role="img">
+    <svg id="dial" viewBox="0 0 200 200" aria-hidden="true">
+      <g id="ticks"></g>
+      <line class="hand" id="hHand" x1="100" y1="100" x2="100" y2="58" stroke-width="4.2"/>
+      <line class="hand" id="mHand" x1="100" y1="100" x2="100" y2="30" stroke-width="2.6"/>
+      <line class="hand sec" id="sHand" x1="100" y1="114" x2="100" y2="22" stroke-width="1.2"/>
+      <circle class="cap" cx="100" cy="100" r="4.2"/>
+    </svg>
+    <div id="digital" aria-hidden="true"></div>
+    <p class="date" id="date" aria-hidden="true"></p>
+  </main>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  var params = new URLSearchParams(window.location.search);
+
+  /* ---------- 1. Read and validate settings from the link ---------- */
+  var style = params.get("style") === "digital" ? "digital" : "analog";
+  var showSeconds = params.get("seconds") !== "off";
+  var hours24 = params.get("hours") !== "12";
+
+  var theme = params.get("theme");
+  if (theme === "light" || theme === "dark" || theme === "neutral") root.setAttribute("data-theme", theme);
+
+  var bg = params.get("bg");
+  if (bg && /^[0-9a-f]{6}$/i.test(bg)) {
+    root.style.setProperty("--bg", "#" + bg);
+  }
+
+  var accent = params.get("accent");
+  if (accent && /^[0-9a-f]{6}$/i.test(accent)) root.style.setProperty("--accent", "#" + accent);
+
+  // Only accept a time zone / language the browser actually understands.
+  var tz, lang = "en";
+  var tzParam = params.get("tz");
+  if (tzParam) {
+    try { new Intl.DateTimeFormat("en", { timeZone: tzParam }); tz = tzParam; } catch (e) { tz = undefined; }
+  }
+  var langParam = params.get("lang");
+  if (langParam) {
+    try { new Intl.DateTimeFormat(langParam); lang = langParam; } catch (e) { lang = "en"; }
+  }
+
+  if (style === "digital") document.body.classList.add("digital");
+  if (!showSeconds) document.getElementById("sHand").style.display = "none";
+
+  /* ---------- 2. Build the dial: 60 ticks, every fifth one in white ---------- */
+  var NS = "http://www.w3.org/2000/svg";
+  var ticksGroup = document.getElementById("ticks");
+  for (var i = 0; i < 60; i++) {
+    var isHour = i % 5 === 0;
+    var t = document.createElementNS(NS, "line");
+    t.setAttribute("x1", "100");
+    t.setAttribute("y1", "6");
+    t.setAttribute("x2", "100");
+    t.setAttribute("y2", isHour ? "20" : "13");
+    t.setAttribute("stroke-width", isHour ? "3" : "1.4");
+    t.setAttribute("transform", "rotate(" + i * 6 + " 100 100)");
+    t.setAttribute("class", "tick" + (isHour ? " hour" : ""));
+    ticksGroup.appendChild(t);
+  }
+
+  /* ---------- 3. Read the time (in the chosen time zone) ---------- */
+  var timeFmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: tz, hour: "numeric", minute: "numeric", second: "numeric", hourCycle: "h23"
+  });
+  var dateFmt = new Intl.DateTimeFormat(lang, {
+    timeZone: tz, weekday: "short", day: "numeric", month: "short"
+  });
+
+  function readTime(date) {
+    var out = { h: 0, m: 0, s: 0 };
+    timeFmt.formatToParts(date).forEach(function (p) {
+      if (p.type === "hour") out.h = parseInt(p.value, 10) % 24;
+      if (p.type === "minute") out.m = parseInt(p.value, 10);
+      if (p.type === "second") out.s = parseInt(p.value, 10);
+    });
+    return out;
+  }
+  function pad(n) { return n < 10 ? "0" + n : "" + n; }
+
+  /* ---------- 4. Draw the current time ---------- */
+  var hHand = document.getElementById("hHand");
+  var mHand = document.getElementById("mHand");
+  var sHand = document.getElementById("sHand");
+  var digital = document.getElementById("digital");
+  var dateEl = document.getElementById("date");
+  var wrap = document.getElementById("wrap");
+  var lastLabel = "";
+
+  function rotate(el, deg) { el.setAttribute("transform", "rotate(" + deg.toFixed(2) + " 100 100)"); }
+
+  function render() {
+    var now = new Date();
+    var t = readTime(now);
+    var dateText = dateFmt.format(now);
+
+    if (style === "analog") {
+      rotate(hHand, ((t.h % 12) + t.m / 60) * 30);
+      rotate(mHand, (t.m + t.s / 60) * 6);
+      rotate(sHand, t.s * 6);
+    } else {
+      var hh = hours24 ? pad(t.h) : String(t.h % 12 || 12);
+      var html = hh + ":" + pad(t.m);
+      digital.textContent = "";
+      digital.appendChild(document.createTextNode(html));
+      if (showSeconds) {
+        var s = document.createElement("span");
+        s.className = "sec";
+        s.textContent = ":" + pad(t.s);
+        digital.appendChild(s);
+      }
+      if (!hours24) {
+        var ap = document.createElement("span");
+        ap.className = "ampm";
+        ap.textContent = t.h >= 12 ? "PM" : "AM";
+        digital.appendChild(ap);
+      }
+    }
+
+    dateEl.textContent = dateText;
+
+    // Update the spoken label once a minute, not every second.
+    var label = pad(t.h) + ":" + pad(t.m) + ", " + dateText;
+    if (label !== lastLabel) { wrap.setAttribute("aria-label", label); lastLabel = label; }
+  }
+
+  // Redraw right after each second boundary so the clock never drifts.
+  function loop() {
+    render();
+    var delay = (showSeconds ? 1000 : 60000) - (Date.now() % (showSeconds ? 1000 : 60000)) + 15;
+    setTimeout(loop, delay);
+  }
+  loop();
+})();
+</script>
+</body>
+</html>
